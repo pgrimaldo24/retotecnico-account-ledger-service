@@ -380,8 +380,6 @@ account-ledger-service/
 ├── mvnw, mvnw.cmd
 ├── pom.xml
 ├── README.md
-├── claude/
-│   └── prompt-readme-account-ledger-service.md
 └── src/
     ├── main/
     │   ├── proto/
