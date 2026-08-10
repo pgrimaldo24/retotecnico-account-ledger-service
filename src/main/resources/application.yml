@@ -1,4 +1,7 @@
 quarkus:
+  log:
+    console:
+      format: "%d{HH:mm:ss} %-5p traceId=%X{traceId} [%c{2.}] (%t) %s%e%n"
   http:
     port: 8081
   grpc:
