@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package com.retobackend.ledger;
+
+option java_package = "com.retobackend.ledger.grpc";
+option java_multiple_files = true;
+
+service LedgerService {
+  rpc ReserveFunds (ReserveFundsRequest) returns (ReserveFundsResponse);
+  rpc ConfirmTransaction (ConfirmTransactionRequest) returns (ConfirmTransactionResponse);
+  rpc CompensateTransaction (CompensateTransactionRequest) returns (CompensateTransactionResponse);
+}
+
+message ReserveFundsRequest {
+  string transaction_id = 1;
+  string source_account = 2;
+  string target_account = 3;
+  double amount = 4;
+  string currency = 5;
+}
+
+message ReserveFundsResponse {
+  string transaction_id = 1;
+  Status status = 2;
+  string message = 3;
+}
+
+message ConfirmTransactionRequest {
+  string transaction_id = 1;
+}
+
+message ConfirmTransactionResponse {
+  string transaction_id = 1;
+  Status status = 2;
+  string message = 3;
+}
+
+message CompensateTransactionRequest {
+  string transaction_id = 1;
+  string reason = 2;
+}
+
+message CompensateTransactionResponse {
+  string transaction_id = 1;
+  Status status = 2;
+}
+
+enum Status {
+  STATUS_UNKNOWN = 0;
+  STATUS_RESERVED = 1;
+  STATUS_CONFIRMED = 2;
+  STATUS_INSUFFICIENT_FUNDS = 3;
+  STATUS_COMPENSATED = 4;
+  STATUS_UNAVAILABLE = 5;
+}
