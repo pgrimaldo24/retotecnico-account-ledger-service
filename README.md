@@ -329,6 +329,58 @@ nativo con GraalVM. El beneficio principal en un clúster EKS es el
 relevante para escalado horizontal agresivo (HPA) o *scale-to-zero*, además de
 un footprint de memoria significativamente menor por pod.
 
+### Contenedor Docker
+
+`src/main/docker/` incluye 4 Dockerfiles (plantilla estándar generada por
+Quarkus), uno por modo de empaquetado:
+
+| Dockerfile | Modo | Build previo requerido |
+|---|---|---|
+| `Dockerfile.jvm` | JVM (fast-jar, por defecto) | `./mvnw package` |
+| `Dockerfile.legacy-jar` | JVM (legacy-jar) | `./mvnw package -Dquarkus.package.jar.type=legacy-jar` |
+| `Dockerfile.native` | Nativo (UBI minimal) | `./mvnw package -Dnative` |
+| `Dockerfile.native-micro` | Nativo (imagen micro de Quarkus, la más liviana) | `./mvnw package -Dnative` |
+
+> **Importante sobre puertos:** los comentarios de estos Dockerfiles (plantilla
+> genérica de Quarkus) documentan `EXPOSE 8080` y `docker run -p 8080:8080`.
+> Ese puerto **no aplica a este servicio**: `application.yml` fija
+> `quarkus.http.port: 8081` y un servidor gRPC separado en `9001`
+> (`use-separate-server: true`), valores que quedan horneados en el artefacto
+> empaquetado. Al correr el contenedor hay que mapear los puertos reales:
+
+```bash
+./mvnw package
+docker build -f src/main/docker/Dockerfile.jvm -t account-ledger-service-jvm .
+docker run -i --rm -p 8081:8081 -p 9001:9001 account-ledger-service-jvm
+```
+
+### Despliegue en Kubernetes
+
+`devops/k8s-manifests.yaml` define un `Deployment` (2 réplicas) y un `Service`
+de tipo **`ClusterIP`** — sin exposición externa, coherente con que este
+servicio está "cerrado al exterior" y solo lo consume
+`transaction-orchestrator-service` dentro del clúster.
+
+| Recurso | Detalle |
+|---|---|
+| Puertos | `http` → `8081` (health/métricas), `grpc` → `9001` |
+| Liveness probe | `GET /q/health/live:8081` (delay 10s, cada 15s, timeout 3s, 3 fallos) |
+| Readiness probe | `GET /q/health/ready:8081` (delay 5s, cada 10s, timeout 3s, 3 fallos) |
+| Recursos | requests `250m` CPU / `256Mi` memoria — limits `500m` CPU / `512Mi` memoria |
+| Service | `ClusterIP` (sin `Ingress`/`LoadBalancer`, solo accesible intra-clúster) |
+
+Antes de aplicar el manifiesto hay que reemplazar el placeholder
+`<TU_REGISTRY>` por el registro real donde se publique la imagen:
+
+```bash
+docker build -f src/main/docker/Dockerfile.jvm -t <TU_REGISTRY>/account-ledger-service:1.0.0 .
+docker push <TU_REGISTRY>/account-ledger-service:1.0.0
+
+kubectl apply -f devops/k8s-manifests.yaml
+kubectl get pods -l app=account-ledger-service
+kubectl port-forward svc/account-ledger-service 8081:8081 9001:9001
+```
+
 ---
 
 ## Testing
@@ -366,10 +418,10 @@ Expuestos por `quarkus-smallrye-health` sobre el puerto HTTP `8081`:
 | `/q/health/ready` | *Readiness probe* — indica si el servicio está listo para recibir tráfico (incluye el estado del servidor gRPC). |
 | `/q/health` | Agregado de liveness + readiness. |
 
-En Kubernetes, estas rutas se referencian típicamente como `livenessProbe` y
-`readinessProbe` en el manifiesto del Deployment, apuntando al puerto `8081`.
-Este repositorio **no incluye actualmente** un manifiesto Kubernetes
-(`k8s-manifests.yaml` u otro) — ver [Pendiente / Fuera de alcance](#pendiente--fuera-de-alcance).
+En Kubernetes, `devops/k8s-manifests.yaml` conecta estas rutas directamente al
+`livenessProbe` y `readinessProbe` del `Deployment`, ambas contra el puerto
+`8081` (detalle completo en
+[Despliegue en Kubernetes](#cómo-ejecutar-el-proyecto)).
 
 ---
 
@@ -377,11 +429,19 @@ Este repositorio **no incluye actualmente** un manifiesto Kubernetes
 
 ```text
 account-ledger-service/
+├── .mvn/wrapper/maven-wrapper.properties
 ├── mvnw, mvnw.cmd
 ├── pom.xml
 ├── README.md
+├── devops/
+│   └── k8s-manifests.yaml
 └── src/
     ├── main/
+    │   ├── docker/
+    │   │   ├── Dockerfile.jvm
+    │   │   ├── Dockerfile.legacy-jar
+    │   │   ├── Dockerfile.native
+    │   │   └── Dockerfile.native-micro
     │   ├── proto/
     │   │   └── ledger.proto
     │   ├── resources/
@@ -468,8 +528,11 @@ account-ledger-service/
 - **`STATUS_UNAVAILABLE`**: declarado en `ledger.proto` pero no utilizado por
   `LedgerGrpcAdapter`; el fallo simulado de `ConfirmTransaction` se propaga hoy
   como un error de RPC (no como un `Status` de negocio en la respuesta).
-- **Manifiestos de Kubernetes**: no existe ningún `k8s-manifests.yaml` (ni
-  equivalente) en este repositorio al momento de escribir este README.
+- **Pipeline CI/CD**: `devops/k8s-manifests.yaml` existe y es aplicable a mano
+  (`kubectl apply`), pero no hay un pipeline (GitHub Actions, GitLab CI, etc.)
+  que construya la imagen, la publique en un registry y la despliegue de forma
+  automática — el placeholder `<TU_REGISTRY>` debe reemplazarse manualmente
+  antes de aplicar el manifiesto.
 - **Persistencia real**: no hay adaptador de salida contra una base de datos;
   solo la implementación en memoria (`InMemoryAccountRepository`,
   `InMemoryReservationRepository`).
